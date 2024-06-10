@@ -1,11 +1,11 @@
 {
-	"id": "floccus-bookmarks-to-markdown",
-	"name": "Floccus Bookmarks to Markdown",
-	"version": "0.2.2",
-	"minAppVersion": "0.15.0",
+	"id": "sync-bookmarks-to-note",
+	"name": "Floccus Bookmarks to local note",
+	"version": "0.1.0",
+	"minAppVersion": "0.1.0",
 	"description": "Bring your Bookmarks from Floccus to your Obsidian",
-	"author": "mddevils",
-	"authorUrl": "https://github.com/mddevils/",
-	"fundingUrl": "https://ko-fi.com/mddevils",
+	"author": "haosapp",
+	"authorUrl": "haosapp@6688.dedyn.io",
+	"fundingUrl": "",
 	"isDesktopOnly": true
 }

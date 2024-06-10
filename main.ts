@@ -1,7 +1,11 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder } from 'obsidian';
+import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, RequestUrlParam, RequestUrlResponse, requestUrl } from 'obsidian';
 import { join, parse } from 'path';
 import { promises as fsPromises } from 'fs';
 import { parseStringPromise } from 'xml2js';
+import { error } from 'console';
+import * as fs from 'fs';
+import * as path from 'path';
+import { finished } from 'stream';
 
 interface fbmPluginSettings {
     xbelFolderPath: string;
@@ -12,6 +16,7 @@ interface fbmPluginSettings {
     keepCount: number;
     automaticUpdate: boolean;
     updateInterval: number;
+    html2mdApi:string;
 }
 
 const DEFAULT_SETTINGS: fbmPluginSettings = {
@@ -22,8 +27,11 @@ const DEFAULT_SETTINGS: fbmPluginSettings = {
     backupFolderPath: '',
     keepCount: 5,
     automaticUpdate: false,
-    updateInterval: 900,
+    updateInterval: 1920,
+    html2mdApi: 'https://r.jina.ai/'
 }
+
+const jsonName = '.bks.json';
 
 export default class fbmPlugin extends Plugin {
     settings: fbmPluginSettings;
@@ -46,7 +54,7 @@ export default class fbmPlugin extends Plugin {
 
         // Call the processXBELFileData function based on the automatic update setting
         if (this.settings.automaticUpdate) {
-            const updateInterval = this.settings.updateInterval * 1000; // Convert seconds to milliseconds
+            const updateInterval = this.settings.updateInterval * 1000 * 60; // Convert minutes to milliseconds
             this.registerInterval(window.setInterval(() => this.processXBELFileData(), updateInterval));
         }
 
@@ -82,10 +90,14 @@ export default class fbmPlugin extends Plugin {
         const mdFile = this.app.vault.getAbstractFileByPath(mdFilePath) as TFile;
 
         // Create the output folder if it doesn't exist
-        const mdFolder = this.app.vault.getAbstractFileByPath(mdFolderPath) as TFolder;
+        /*const mdFolder = this.app.vault.getAbstractFileByPath(mdFolderPath) as TFolder;
         if (!mdFolder) {
             await this.app.vault.createFolder(mdFolderPath);
+        }*/
+        if (!fs.existsSync(mdFolderPath)) {
+            fs.mkdirSync(mdFolderPath, { recursive: true });
         }
+        
 
         // Check if the output file already exists and backup if necessary
         if (mdFile) {
@@ -97,7 +109,16 @@ export default class fbmPlugin extends Plugin {
 
         try {
             // Read the XBEL file
-            const xbelData = await fsPromises.readFile(xbelFilePath, 'utf8');
+            let xbelData = '';
+            if(xbelFolderPath?.startsWith('http://') || xbelFolderPath?.startsWith('https://')) {
+                const { path, username, password } = this.parseUrl(`${xbelFolderPath}/${xbelFileName}`);
+                const res = await this.getWebDavFile(path, username, password);
+                if (res !== null) {
+                    xbelData = res.toString();
+                }
+            } else {
+                xbelData = await fsPromises.readFile(xbelFilePath, 'utf8');
+            }
         
             // Parse the XBEL file
             const result = await parseStringPromise(xbelData);
@@ -106,10 +127,12 @@ export default class fbmPlugin extends Plugin {
             const mdData = this.writeFolderStructure(result.xbel);
         
             // Create the Markdown file with the generated data
-            await this.app.vault.create(mdFilePath, mdData);
+            // await this.app.vault.create(mdFilePath, mdData);
+            await fs.writeFile(mdFilePath, mdData, error =>{});
         } catch (error) {
             console.error('An error occurred:', error);
         }
+        console.log('work finished!');
     }
     
     async backupExistingFile(file: TFile, backupFolderPath: string): Promise<void> {
@@ -163,8 +186,13 @@ export default class fbmPlugin extends Plugin {
     }
 
     writeFolderStructure(element: any, level = 0): string {
+        const {
+            html2mdApi,
+            mdFolderPath
+        } = this.settings;
+
         let data = '';
-    
+        const fileNameLength = 40;
         // Process child elements (folders and bookmarks)
         if (typeof element === 'object') {
             if (element.hasOwnProperty('folder') || element.hasOwnProperty('bookmark')) {
@@ -176,7 +204,9 @@ export default class fbmPlugin extends Plugin {
     
                 data += '#'.repeat(level+1) + ' ' + folderTitle + '\n';
             }
-    
+            
+            const fileNames = this.getExistBookMark(mdFolderPath, jsonName);
+            let nameSiteMapping = new Map();
             if (Array.isArray(element.bookmark)) {
                 // Process bookmarks
                 element.bookmark.forEach((bookmark: any) => {
@@ -184,6 +214,15 @@ export default class fbmPlugin extends Plugin {
                     const title: string = bookmark.title[0];
                     const linkTitle = `[${title}](${link})`;
                     data += linkTitle + '\n';
+                    // Get the content of the link in the bookmark and save it
+                    if(html2mdApi?.length > 0) {
+                        const fileName = `${title.substring(0, fileNameLength).trim().replace(/[\/:*?"<>|]/g, '')}.md`;
+                        console.log(`${mdFolderPath}/${fileName} check......`);
+                        if(!fileNames.includes(`${mdFolderPath}/${fileName}`)) {
+                            console.log(`${mdFolderPath}/${fileName} not exist.`);
+                            nameSiteMapping.set(`${html2mdApi}${link}`, `${mdFolderPath}/${fileName}`);
+                        }
+                    }
                 });
             }
     
@@ -193,9 +232,143 @@ export default class fbmPlugin extends Plugin {
                     data += this.writeFolderStructure(subfolder, level + 1);
                 });
             }
+            if(nameSiteMapping.size > 0) {
+                console.log(nameSiteMapping);
+                this.processBkLinks(nameSiteMapping, 1500).then(() => {
+                    // 保存已经抓取的书签到json文件 
+                    fileNames.push(...Array.from(nameSiteMapping.values()));
+                    this.saveContent2json(`${mdFolderPath}/${jsonName}`, Array.from(new Set(fileNames)));
+                }).catch(error => {
+                    console.error('An error occurred during fetching:', error);
+                });
+            }
         }
     
         return data;
+    }
+
+    // 获取已经保存的书签列表
+    getExistBookMark(dirPath: string, jsonName: string | null): string[] {
+        const files: string[] = [];
+        const items = fs.readdirSync(dirPath);
+
+        for (const item of items) {
+            const fullPath = path.join(dirPath, item);
+            const stats = fs.lstatSync(fullPath);
+
+            if (stats.isDirectory()) {
+                // 递归遍历子目录
+                const nestedFiles = this.getExistBookMark(fullPath, null);
+                files.push(...nestedFiles);
+            } else {
+                // 收集文件名
+                files.push(`${dirPath}/${item}`);
+            }
+        }
+        // 加入已经写入的url
+        if(jsonName && jsonName?.length > 0) {
+            try {
+                const data = fs.readFileSync(`${dirPath}/${jsonName}`, 'utf8');
+                files.push(...JSON.parse(data));
+              } catch (err) {
+                console.error('读取文件时发生错误:', err);
+              }
+        }
+        
+        return Array.from(new Set(files));
+    }
+
+    saveContent2json(filePath: string, content: any) {
+        // 将数组转换为 JSON 字符串
+        const dataToWrite = JSON.stringify(content);
+        fs.writeFile(filePath, dataToWrite, (err) => {
+          if (err) {
+            console.error('Error writing file:', err);
+            return;
+          }
+          console.log('Array written to file successfully!');
+        });
+    }
+
+    async processBkLinks(nameSiteMapping: Map<string, string>, interval: number = 2000): Promise<void> {
+        for (let [url, mdPath] of nameSiteMapping.entries()) {
+            console.log(url, mdPath);
+            try {
+                const options: RequestUrlParam = {
+                    url: url,
+                    method: 'GET'
+                };
+                const response = await requestUrl(options);
+                // 在这里处理你的数据
+                const fileData = await response.text;
+                await fs.promises.writeFile(mdPath, fileData); // 使用fs.promises进行异步写入
+            } catch (error) {
+                console.error(`Fetch failed for ${url}:`, error);
+                /*if(error.toString().trim().includes('status 429')) {
+                    await new Promise(resolve => setTimeout(resolve, interval));
+                }*/
+            }
+            // 等待指定的间隔
+            await new Promise(resolve => setTimeout(resolve, interval));
+        }
+    }
+
+    async getWebDavFile(url: string, username: string | null, password: string | null): Promise<string> {
+        let auth = '';
+        if(username && password) {
+          auth = `Basic ${btoa(`${username}:${password}`)}`
+        }
+        console.log(`url=${url},username=${username},pass=${password},auth=${auth}`);
+        const options: RequestUrlParam = {
+            url: url,
+            method: 'GET',
+            headers: {
+                'Content-Type': 'text/xml; charset="utf-8"',
+                Authorization: auth
+            }
+        }     
+        try {
+            const response = await requestUrl(options);
+            return await response.text;
+        } catch(e) {
+            console.log(JSON.stringify(e));
+        }
+        return '';
+      }
+    
+    async reSync() {
+        const {
+            mdFolderPath
+        } = this.settings;
+        try {
+            await fs.promises.unlink(`${mdFolderPath}/${jsonName}`);
+            console.log(`File ${mdFolderPath}/${jsonName} has been deleted.`);
+        } catch (error) {
+            console.error(`Error deleting file ${mdFolderPath}/${jsonName}:`, error);
+            return;
+        }
+        this.processXBELFileData();
+    }
+
+    parseUrl(url: string): { path: string, username: string | null, password: string | null } {
+        // 使用正则表达式匹配并捕获协议、用户名、密码和URL主体部分
+        const regex = /^(?<protocol>[^:]+):\/\/(?<username>[^@]+)@(?<password>[^:]+):(?<url>.+)$/;
+        const match = url.match(regex);
+        if (match && match.groups) {
+            // 从匹配结果中提取协议、用户名、密码和URL主体
+            const { protocol, username, password, url } = match.groups;
+            const path = `${protocol}://${url}`;
+            return {
+                path,
+                username,
+                password
+            };
+        } 
+        return {
+            path: url,
+            username: null,
+            password: null
+        };
     }
     
 }
@@ -301,7 +474,7 @@ class FBMSettingTab extends PluginSettingTab {
         );
 
         new Setting(containerEl)
-        .setName('Update interval (in seconds)')
+        .setName('Update interval (in minutes)')
         .setDesc('Specify the interval for automatic updates. Automatic update bookmarks must be on.')
         .addText((text) =>
             text
@@ -314,5 +487,31 @@ class FBMSettingTab extends PluginSettingTab {
                 }
             })
         );
+
+        new Setting(containerEl)
+        .setName('Html to Markdown API URL')
+        .setDesc('The HTML to Markdown API.')
+        .addText((text) =>
+            text
+            .setValue(this.plugin.settings.html2mdApi)
+            .onChange(async (value) => {
+                this.plugin.settings.html2mdApi = value;
+                await this.plugin.saveSettings();
+            })
+        );
+
+        new Setting(containerEl)
+        .setName("Resync bookmarks")
+        .setDesc(
+          `Solve the problem that bookmark synchronization is not synchronized due to an error.`
+        )
+        .addButton((cb) => {
+          cb.setWarning()
+            .setButtonText("Resync bookmarks")
+            .onClick(() => {
+                this.plugin.reSync();
+            });
+        });
+
     }
 }
