@@ -6047,7 +6047,7 @@ var fbmPlugin = class extends import_obsidian.Plugin {
       });
       if (this.nameSiteMapping.size > 0) {
         console.log(this.nameSiteMapping);
-        this.processBkLinks(this.nameSiteMapping, 900).then(() => {
+        this.processBkLinks(this.nameSiteMapping, 1200).then(() => {
           this.fileNames.push(...Array.from(this.nameSiteMapping.values()));
           this.saveContent2json(`${mdFolderPath}/${jsonName}`, Array.from(new Set(this.fileNames)));
           console.log("work finished!");
@@ -6102,12 +6102,18 @@ var fbmPlugin = class extends import_obsidian.Plugin {
     let data = "";
     const fileNameLength = 40;
     if (typeof element === "object") {
+      let folderTitle = "";
       if (element.hasOwnProperty("folder") || element.hasOwnProperty("bookmark")) {
-        const folderTitle = element.title ? element.title[0] : "Bookmarks";
+        folderTitle = element.title ? element.title[0] : "Bookmarks";
         if (level !== 0) {
           data += "\n";
         }
         data += "#".repeat(level + 1) + " " + folderTitle + "\n";
+        if (level > 0) {
+          if (!fs.existsSync(`${mdFolderPath}/${folderTitle}`)) {
+            fs.mkdirSync(`${mdFolderPath}/${folderTitle}`, { recursive: true });
+          }
+        }
       }
       if (Array.isArray(element.bookmark)) {
         element.bookmark.forEach((bookmark) => {
@@ -6117,10 +6123,11 @@ var fbmPlugin = class extends import_obsidian.Plugin {
           data += linkTitle + "\n";
           if ((html2mdApi == null ? void 0 : html2mdApi.length) > 0) {
             const fileName = `${title.substring(0, fileNameLength).trim().replace(/[\/:*?"<>|]/g, "")}.md`;
-            console.log(`${mdFolderPath}/${fileName} check......`);
-            if (!this.fileNames.includes(`${mdFolderPath}/${fileName}`)) {
-              console.log(`${mdFolderPath}/${fileName} not exist.`);
-              this.nameSiteMapping.set(`${html2mdApi}${link}`, `${mdFolderPath}/${fileName}`);
+            const file = level > 0 ? `${mdFolderPath}/${folderTitle}/${fileName}` : `${mdFolderPath}/${fileName}`;
+            console.log(`${file} check......`);
+            if (!this.fileNames.includes(`${file}`)) {
+              console.log(`${file} not exist.`);
+              this.nameSiteMapping.set(`${html2mdApi}${link}`, `${file}`);
             }
           }
         });
@@ -6180,6 +6187,9 @@ var fbmPlugin = class extends import_obsidian.Plugin {
         await fs.promises.writeFile(mdPath, fileData);
       } catch (error) {
         console.error(`Fetch failed for ${url}:`, error);
+        if (error.toString().trim().includes("status 429")) {
+          await new Promise((resolve) => setTimeout(resolve, 6e3));
+        }
       }
       await new Promise((resolve) => setTimeout(resolve, interval));
     }

@@ -137,7 +137,7 @@ export default class fbmPlugin extends Plugin {
 
             if(this.nameSiteMapping.size > 0) {
                 console.log(this.nameSiteMapping);
-                this.processBkLinks(this.nameSiteMapping, 900).then(() => {
+                this.processBkLinks(this.nameSiteMapping, 1200).then(() => {
                     // 保存已经抓取的书签到json文件 
                     this.fileNames.push(...Array.from(this.nameSiteMapping.values()));
                     this.saveContent2json(`${mdFolderPath}/${jsonName}`, Array.from(new Set(this.fileNames)));
@@ -212,18 +212,22 @@ export default class fbmPlugin extends Plugin {
         const fileNameLength = 40;
         // Process child elements (folders and bookmarks)
         if (typeof element === 'object') {
+            let folderTitle: string = '';
             if (element.hasOwnProperty('folder') || element.hasOwnProperty('bookmark')) {
-                const folderTitle: string = element.title ? element.title[0] : 'Bookmarks';
+                folderTitle = element.title ? element.title[0] : 'Bookmarks';
     
                 if (level !== 0) {
                     data += '\n';
                 }
-    
+                
                 data += '#'.repeat(level+1) + ' ' + folderTitle + '\n';
+                if(level > 0){
+                    if (!fs.existsSync(`${mdFolderPath}/${folderTitle}`)) {
+                        fs.mkdirSync(`${mdFolderPath}/${folderTitle}`, { recursive: true });
+                    }
+                }
             }
             
-            //const fileNames = this.getExistBookMark(mdFolderPath, jsonName);
-            //let nameSiteMapping = new Map();
             if (Array.isArray(element.bookmark)) {
                 // Process bookmarks
                 element.bookmark.forEach((bookmark: any) => {
@@ -234,10 +238,11 @@ export default class fbmPlugin extends Plugin {
                     // Get the content of the link in the bookmark and save it
                     if(html2mdApi?.length > 0) {
                         const fileName = `${title.substring(0, fileNameLength).trim().replace(/[\/:*?"<>|]/g, '')}.md`;
-                        console.log(`${mdFolderPath}/${fileName} check......`);
-                        if(!this.fileNames.includes(`${mdFolderPath}/${fileName}`)) {
-                            console.log(`${mdFolderPath}/${fileName} not exist.`);
-                            this.nameSiteMapping.set(`${html2mdApi}${link}`, `${mdFolderPath}/${fileName}`);
+                        const file = level > 0 ? `${mdFolderPath}/${folderTitle}/${fileName}` : `${mdFolderPath}/${fileName}`;
+                        console.log(`${file} check......`);
+                        if(!this.fileNames.includes(`${file}`)) {
+                            console.log(`${file} not exist.`);
+                            this.nameSiteMapping.set(`${html2mdApi}${link}`, `${file}`);
                         }
                     }
                 });
@@ -249,18 +254,6 @@ export default class fbmPlugin extends Plugin {
                     data += this.writeFolderStructure(subfolder, level + 1);
                 });
             }
-
-            /*
-            if(nameSiteMapping.size > 0) {
-                console.log(nameSiteMapping);
-                this.processBkLinks(nameSiteMapping, 1500).then(() => {
-                    // 保存已经抓取的书签到json文件 
-                    fileNames.push(...Array.from(nameSiteMapping.values()));
-                    this.saveContent2json(`${mdFolderPath}/${jsonName}`, Array.from(new Set(fileNames)));
-                }).catch(error => {
-                    console.error('An error occurred during fetching:', error);
-                });
-            }*/
         }
     
         return data;
@@ -323,9 +316,9 @@ export default class fbmPlugin extends Plugin {
                 await fs.promises.writeFile(mdPath, fileData); // 使用fs.promises进行异步写入
             } catch (error) {
                 console.error(`Fetch failed for ${url}:`, error);
-                /*if(error.toString().trim().includes('status 429')) {
-                    await new Promise(resolve => setTimeout(resolve, interval));
-                }*/
+                if(error.toString().trim().includes('status 429')) {
+                    await new Promise(resolve => setTimeout(resolve, 6000));
+                }
             }
             // 等待指定的间隔
             await new Promise(resolve => setTimeout(resolve, interval));
