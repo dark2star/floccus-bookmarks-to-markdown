@@ -35,19 +35,21 @@ const jsonName = '.bks.json';
 
 export default class fbmPlugin extends Plugin {
     settings: fbmPluginSettings;
+    nameSiteMapping: Map<any, any>;
+    fileNames: string[];
 
     async onload() {
         await this.loadSettings();
         
         // This creates an icon in the left ribbon.
-        const bookmarkIconEl = this.addRibbonIcon('bookmark', 'Floccus Bookmarks to Markdown', (evt: MouseEvent) => {
+        const bookmarkIconEl = this.addRibbonIcon('book-marked', 'Sync Bookmarks To Note', (evt: MouseEvent) => {
             // Called when the user clicks the icon.
             this.processXBELFileData();
-            new Notice('Floccus Bookmarks Markdown Updated!');
+            new Notice('Bookmarks Markdown Updated!');
         });
 
         // Perform additional things with the ribbon
-        bookmarkIconEl.addClass('floccus-bookmarks-to-md-icon');
+        bookmarkIconEl.addClass('sync-bookmarks-to-note-icon');
 
         // This adds a settings tab so the user can configure various aspects of the plugin
         this.addSettingTab(new FBMSettingTab(this.app, this));
@@ -123,16 +125,31 @@ export default class fbmPlugin extends Plugin {
             // Parse the XBEL file
             const result = await parseStringPromise(xbelData);
         
+            this.fileNames = this.getExistBookMark(mdFolderPath, jsonName);
+            this.nameSiteMapping = new Map();
+
             // Generate the folder structure
             const mdData = this.writeFolderStructure(result.xbel);
         
             // Create the Markdown file with the generated data
             // await this.app.vault.create(mdFilePath, mdData);
             await fs.writeFile(mdFilePath, mdData, error =>{});
+
+            if(this.nameSiteMapping.size > 0) {
+                console.log(this.nameSiteMapping);
+                this.processBkLinks(this.nameSiteMapping, 900).then(() => {
+                    // 保存已经抓取的书签到json文件 
+                    this.fileNames.push(...Array.from(this.nameSiteMapping.values()));
+                    this.saveContent2json(`${mdFolderPath}/${jsonName}`, Array.from(new Set(this.fileNames)));
+                    console.log('work finished!');
+                    new Notice('Sync Bookmarks To Note finished!');
+                }).catch(error => {
+                    console.error('An error occurred during fetching:', error);
+                });
+            }
         } catch (error) {
             console.error('An error occurred:', error);
         }
-        console.log('work finished!');
     }
     
     async backupExistingFile(file: TFile, backupFolderPath: string): Promise<void> {
@@ -205,8 +222,8 @@ export default class fbmPlugin extends Plugin {
                 data += '#'.repeat(level+1) + ' ' + folderTitle + '\n';
             }
             
-            const fileNames = this.getExistBookMark(mdFolderPath, jsonName);
-            let nameSiteMapping = new Map();
+            //const fileNames = this.getExistBookMark(mdFolderPath, jsonName);
+            //let nameSiteMapping = new Map();
             if (Array.isArray(element.bookmark)) {
                 // Process bookmarks
                 element.bookmark.forEach((bookmark: any) => {
@@ -218,9 +235,9 @@ export default class fbmPlugin extends Plugin {
                     if(html2mdApi?.length > 0) {
                         const fileName = `${title.substring(0, fileNameLength).trim().replace(/[\/:*?"<>|]/g, '')}.md`;
                         console.log(`${mdFolderPath}/${fileName} check......`);
-                        if(!fileNames.includes(`${mdFolderPath}/${fileName}`)) {
+                        if(!this.fileNames.includes(`${mdFolderPath}/${fileName}`)) {
                             console.log(`${mdFolderPath}/${fileName} not exist.`);
-                            nameSiteMapping.set(`${html2mdApi}${link}`, `${mdFolderPath}/${fileName}`);
+                            this.nameSiteMapping.set(`${html2mdApi}${link}`, `${mdFolderPath}/${fileName}`);
                         }
                     }
                 });
@@ -232,6 +249,8 @@ export default class fbmPlugin extends Plugin {
                     data += this.writeFolderStructure(subfolder, level + 1);
                 });
             }
+
+            /*
             if(nameSiteMapping.size > 0) {
                 console.log(nameSiteMapping);
                 this.processBkLinks(nameSiteMapping, 1500).then(() => {
@@ -241,7 +260,7 @@ export default class fbmPlugin extends Plugin {
                 }).catch(error => {
                     console.error('An error occurred during fetching:', error);
                 });
-            }
+            }*/
         }
     
         return data;
@@ -388,7 +407,7 @@ class FBMSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
         .setName('Xbel absolute folder path')
-        .setDesc('The absolute folder path of the xbel file.')
+        .setDesc('The absolute folder path of the xbel file. Support webdav, format:https://username@password:url')
         .addText((text) =>
             text
             .setValue(this.plugin.settings.xbelFolderPath)
@@ -509,6 +528,7 @@ class FBMSettingTab extends PluginSettingTab {
           cb.setWarning()
             .setButtonText("Resync bookmarks")
             .onClick(() => {
+                new Notice('Task start,Please be patient.');
                 this.plugin.reSync();
             });
         });

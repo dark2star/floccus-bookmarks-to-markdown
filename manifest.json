@@ -1,9 +1,9 @@
 {
 	"id": "sync-bookmarks-to-note",
-	"name": "Floccus Bookmarks to local note",
+	"name": "Sync Bookmarks To Note",
 	"version": "0.2.1",
 	"minAppVersion": "0.1.0",
-	"description": "Bring your Bookmarks from Floccus to your Obsidian",
+	"description": "Bring your Bookmarks from Floccus to your Obsidian note",
 	"author": "haosapp",
 	"authorUrl": "haosapp@6688.dedyn.io",
 	"fundingUrl": "",

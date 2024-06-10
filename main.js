@@ -5988,11 +5988,11 @@ var jsonName = ".bks.json";
 var fbmPlugin = class extends import_obsidian.Plugin {
   async onload() {
     await this.loadSettings();
-    const bookmarkIconEl = this.addRibbonIcon("bookmark", "Floccus Bookmarks to Markdown", (evt) => {
+    const bookmarkIconEl = this.addRibbonIcon("book-marked", "Sync Bookmarks To Note", (evt) => {
       this.processXBELFileData();
-      new import_obsidian.Notice("Floccus Bookmarks Markdown Updated!");
+      new import_obsidian.Notice("Bookmarks Markdown Updated!");
     });
-    bookmarkIconEl.addClass("floccus-bookmarks-to-md-icon");
+    bookmarkIconEl.addClass("sync-bookmarks-to-note-icon");
     this.addSettingTab(new FBMSettingTab(this.app, this));
     if (this.settings.automaticUpdate) {
       const updateInterval = this.settings.updateInterval * 1e3 * 60;
@@ -6040,13 +6040,25 @@ var fbmPlugin = class extends import_obsidian.Plugin {
         xbelData = await import_fs.promises.readFile(xbelFilePath, "utf8");
       }
       const result = await (0, import_xml2js.parseStringPromise)(xbelData);
+      this.fileNames = this.getExistBookMark(mdFolderPath, jsonName);
+      this.nameSiteMapping = /* @__PURE__ */ new Map();
       const mdData = this.writeFolderStructure(result.xbel);
       await fs.writeFile(mdFilePath, mdData, (error) => {
       });
+      if (this.nameSiteMapping.size > 0) {
+        console.log(this.nameSiteMapping);
+        this.processBkLinks(this.nameSiteMapping, 900).then(() => {
+          this.fileNames.push(...Array.from(this.nameSiteMapping.values()));
+          this.saveContent2json(`${mdFolderPath}/${jsonName}`, Array.from(new Set(this.fileNames)));
+          console.log("work finished!");
+          new import_obsidian.Notice("Sync Bookmarks To Note finished!");
+        }).catch((error) => {
+          console.error("An error occurred during fetching:", error);
+        });
+      }
     } catch (error) {
       console.error("An error occurred:", error);
     }
-    console.log("work finished!");
   }
   async backupExistingFile(file, backupFolderPath) {
     const now = new Date();
@@ -6097,8 +6109,6 @@ var fbmPlugin = class extends import_obsidian.Plugin {
         }
         data += "#".repeat(level + 1) + " " + folderTitle + "\n";
       }
-      const fileNames = this.getExistBookMark(mdFolderPath, jsonName);
-      let nameSiteMapping = /* @__PURE__ */ new Map();
       if (Array.isArray(element.bookmark)) {
         element.bookmark.forEach((bookmark) => {
           const link = bookmark.$.href;
@@ -6108,9 +6118,9 @@ var fbmPlugin = class extends import_obsidian.Plugin {
           if ((html2mdApi == null ? void 0 : html2mdApi.length) > 0) {
             const fileName = `${title.substring(0, fileNameLength).trim().replace(/[\/:*?"<>|]/g, "")}.md`;
             console.log(`${mdFolderPath}/${fileName} check......`);
-            if (!fileNames.includes(`${mdFolderPath}/${fileName}`)) {
+            if (!this.fileNames.includes(`${mdFolderPath}/${fileName}`)) {
               console.log(`${mdFolderPath}/${fileName} not exist.`);
-              nameSiteMapping.set(`${html2mdApi}${link}`, `${mdFolderPath}/${fileName}`);
+              this.nameSiteMapping.set(`${html2mdApi}${link}`, `${mdFolderPath}/${fileName}`);
             }
           }
         });
@@ -6118,15 +6128,6 @@ var fbmPlugin = class extends import_obsidian.Plugin {
       if (Array.isArray(element.folder)) {
         element.folder.forEach((subfolder) => {
           data += this.writeFolderStructure(subfolder, level + 1);
-        });
-      }
-      if (nameSiteMapping.size > 0) {
-        console.log(nameSiteMapping);
-        this.processBkLinks(nameSiteMapping, 1500).then(() => {
-          fileNames.push(...Array.from(nameSiteMapping.values()));
-          this.saveContent2json(`${mdFolderPath}/${jsonName}`, Array.from(new Set(fileNames)));
-        }).catch((error) => {
-          console.error("An error occurred during fetching:", error);
         });
       }
     }
@@ -6245,7 +6246,7 @@ var FBMSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("Xbel absolute folder path").setDesc("The absolute folder path of the xbel file.").addText(
+    new import_obsidian.Setting(containerEl).setName("Xbel absolute folder path").setDesc("The absolute folder path of the xbel file. Support webdav, format:https://username@password:url").addText(
       (text) => text.setValue(this.plugin.settings.xbelFolderPath).onChange(async (value) => {
         this.plugin.settings.xbelFolderPath = value;
         await this.plugin.saveSettings();
@@ -6309,6 +6310,7 @@ var FBMSettingTab = class extends import_obsidian.PluginSettingTab {
       `Solve the problem that bookmark synchronization is not synchronized due to an error.`
     ).addButton((cb) => {
       cb.setWarning().setButtonText("Resync bookmarks").onClick(() => {
+        new import_obsidian.Notice("Task start,Please be patient.");
         this.plugin.reSync();
       });
     });

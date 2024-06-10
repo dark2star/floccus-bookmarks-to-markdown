@@ -1,7 +1,7 @@
 {
-	"name": "floccus-bookmarks-to-markdown",
+	"name": "sync-bookmarks-to-note",
 	"version": "0.2.1",
-	"description": "Bring your Bookmarks from Floccus to your Obsidian",
+	"description": "Bring your Bookmarks from Floccus to your Obsidian note",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
